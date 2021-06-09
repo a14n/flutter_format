@@ -38,6 +38,8 @@ Future<void> formatFiles(List<String> files) async {
   await driver.analyze();
 }
 
+const indentation = 2;
+
 class FlutterFormat extends GeneralizingAstVisitor<void>
     implements PostVisitCallback, PostAnalysisCallback, AstContext {
   late Folder currentFolder;
@@ -137,6 +139,21 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
       }
     }
     super.visitCompilationUnitMember(node);
+  }
+
+  @override
+  void visitClassDeclaration(ClassDeclaration node) {
+    var locNode =
+        lineInfo.getLocation(node.firstTokenAfterCommentAndMetadata.offset);
+    for (var member in node.members) {
+      var offset = member.firstTokenAfterCommentAndMetadata.offset;
+      var loc = lineInfo.getLocation(offset);
+      var colDelta = locNode.columnNumber + indentation - loc.columnNumber;
+      if (colDelta != 0) {
+        addChange(Change.shift(offset, colDelta));
+      }
+    }
+    super.visitClassDeclaration(node);
   }
 }
 
