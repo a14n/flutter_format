@@ -124,28 +124,19 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
         }
       }
     }
-
     super.visitAnnotatedNode(node);
   }
 
   @override
-  void visitTopLevelVariableDeclaration(TopLevelVariableDeclaration node) {
-    var offset = node.firstTokenAfterCommentAndMetadata.offset;
-    var loc = lineInfo.getLocation(offset);
-    if (loc.columnNumber > 1) {
-      addChange(Change.shift(offset, 1 - loc.columnNumber));
+  void visitCompilationUnitMember(CompilationUnitMember node) {
+    if (node.parent is! Statement) {
+      var offset = node.firstTokenAfterCommentAndMetadata.offset;
+      var loc = lineInfo.getLocation(offset);
+      if (loc.columnNumber > 1) {
+        addChange(Change.shift(offset, 1 - loc.columnNumber));
+      }
     }
-    super.visitTopLevelVariableDeclaration(node);
-  }
-
-  @override
-  void visitClassDeclaration(ClassDeclaration node) {
-    var offset = node.firstTokenAfterCommentAndMetadata.offset;
-    var loc = lineInfo.getLocation(offset);
-    if (loc.columnNumber > 1) {
-      addChange(Change.shift(offset, 1 - loc.columnNumber));
-    }
-    return super.visitClassDeclaration(node);
+    super.visitCompilationUnitMember(node);
   }
 }
 
