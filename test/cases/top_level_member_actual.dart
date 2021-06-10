@@ -8,5 +8,5 @@ final int i = 1;
   final int i1 = 1;
 
 void m() {
-  void f(){};
+  void f(){}
 }
