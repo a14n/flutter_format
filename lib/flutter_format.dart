@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:_fe_analyzer_shared/src/scanner/token.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/syntactic_entity.dart';
 import 'package:analyzer/dart/ast/token.dart';
@@ -132,17 +133,11 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
     var columnRef = content.getStartColumnOfLine(node.beginToken.offset);
     var lineNumber = locOfNode(node).lineNumber;
     if (hasTrailingComma(node.parameters)) {
-      var currentLine = lineNumber;
-      for (var parameter in node.parameters) {
-        currentLine += 1;
-        var loc = locOfNode(parameter);
-        var startline = loc.lineNumber;
-        var endline = content.locOfOldOffset(parameter.end).lineNumber;
-        currentLine += endline - startline;
-        var newLoc = CharacterLocation(currentLine, columnRef + indentation);
-        content.move(loc, newLoc);
-      }
-      currentLine += 1;
+      var currentLine = visitNodeListWithTrailingComma(
+        lineNumber: lineNumber,
+        newColumn: columnRef + indentation,
+        nodes: node.parameters,
+      );
 
       // move end of list tokens
       var endToken = node.rightDelimiter ?? node.rightParenthesis;
@@ -150,6 +145,64 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
       content.move(content.locOfOldOffset(endToken.offset), newLoc);
     }
     super.visitFormalParameterList(node);
+  }
+
+  @override
+  void visitArgumentList(ArgumentList node) {
+    var columnRef = content.getStartColumnOfLine(node.beginToken.offset);
+    var lineNumber = locOfNode(node).lineNumber;
+    if (hasTrailingComma(node.arguments)) {
+      var currentLine = visitNodeListWithTrailingComma(
+        lineNumber: lineNumber,
+        newColumn: columnRef + indentation,
+        nodes: node.arguments,
+      );
+
+      // move end of list tokens
+      var endToken = node.rightParenthesis;
+      var newLoc = CharacterLocation(currentLine, columnRef);
+      content.move(content.locOfOldOffset(endToken.offset), newLoc);
+    }
+    super.visitArgumentList(node);
+  }
+
+  int visitNodeListWithTrailingComma({
+    required int lineNumber,
+    required int newColumn,
+    required NodeList nodes,
+  }) {
+    CharacterLocation locOfNodeWithComments(AstNode node) {
+      var begin = node.beginToken;
+      var comments = begin.precedingComments;
+
+      // if commment start the line, we return it
+      if (comments != null) {
+        var commentLoc = locOfEntity(comments);
+        var startLineCol = content.getStartColumnOfLine(comments.offset);
+        if (commentLoc.columnNumber == startLineCol &&
+            commentLoc.columnNumber != 1) {
+          return commentLoc;
+        }
+      }
+
+      return locOfEntity(begin);
+    }
+
+    var currentLine = lineNumber;
+    for (var node in nodes) {
+      currentLine += 1;
+      var endline = content.locOfOldOffset(node.end).lineNumber;
+      var newLoc = CharacterLocation(currentLine, newColumn);
+      var locFull = locOfNodeWithComments(node);
+      content.move(locFull, newLoc);
+      var loc = locOfNode(node);
+      content.moveToColumn(loc, newColumn);
+
+      var startline = locFull.lineNumber;
+      currentLine += endline - startline;
+    }
+    currentLine += 1;
+    return currentLine;
   }
 
   @override
@@ -200,6 +253,17 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
 
   @override
   void visitNode(AstNode node) {
+    var comments = node.beginToken.precedingComments;
+    while (comments != null) {
+      var commentLoc = locOfEntity(comments);
+      var startLineCol = content.getStartColumnOfLine(comments.offset);
+      if (commentLoc.columnNumber == startLineCol &&
+          commentLoc.columnNumber != 1) {
+        content.moveToColumn(commentLoc, locOfNode(node).columnNumber);
+      }
+      comments = comments.next as CommentToken?;
+    }
+
     if (skipChildren) {
       skipChildren = false;
       return;
@@ -207,14 +271,21 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
     super.visitNode(node);
   }
 
-  bool hasTrailingComma(NodeList<FormalParameter> parameters) {
+  bool hasTrailingComma(NodeList parameters) {
     if (parameters.isEmpty) return false;
     return parameters.last.endToken.next?.type == TokenType.COMMA;
   }
 
   CharacterLocation locOfNode(AstNode node) {
-    var entity =
-        node is AnnotatedNode ? node.firstTokenAfterCommentAndMetadata : node;
+    final SyntacticEntity entity;
+    if (node is AnnotatedNode) {
+      entity = node.firstTokenAfterCommentAndMetadata;
+    } else if (node is FormalParameter) {
+      entity = node.childEntities
+          .firstWhere((e) => e is! Comment && e is! Annotation);
+    } else {
+      entity = node;
+    }
     return locOfEntity(entity);
   }
 
@@ -336,7 +407,7 @@ class Change {
   }
 
   int updateOffset(int oldOffset) {
-    if (oldOffset <= offset + (min(deleteBlankUntil ?? 0, 0))) {
+    if (oldOffset < offset + (min(deleteBlankUntil ?? 0, 0))) {
       return oldOffset;
     }
     if (oldOffset >= offset + max(deleteBlankUntil ?? 0, 0)) {
