@@ -34,3 +34,9 @@ void m5(
   int j,
 ) {
 }
+
+void m6(
+  int i,
+  // a comment
+) {
+}

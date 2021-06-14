@@ -32,3 +32,9 @@ void m5(
   int i,int j,
 ) {
 }
+
+void m6(
+  int i,
+  // a comment
+) {
+}

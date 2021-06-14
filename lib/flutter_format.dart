@@ -141,8 +141,15 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
 
       // move end of list tokens
       var endToken = node.rightDelimiter ?? node.rightParenthesis;
+      var endTokenLoc = content.locOfOldOffset(endToken.offset);
+      var precedingComments = endToken.precedingComments;
+      if (precedingComments != null) {
+        visitComments(node.beginToken, locOfNode(node).columnNumber);
+        currentLine +=
+            endTokenLoc.lineNumber - locOfEntity(precedingComments).lineNumber;
+      }
       var newLoc = CharacterLocation(currentLine, columnRef);
-      content.move(content.locOfOldOffset(endToken.offset), newLoc);
+      content.move(endTokenLoc, newLoc);
     }
     super.visitFormalParameterList(node);
   }
@@ -160,8 +167,15 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
 
       // move end of list tokens
       var endToken = node.rightParenthesis;
+      var endTokenLoc = content.locOfOldOffset(endToken.offset);
+      var precedingComments = endToken.precedingComments;
+      if (precedingComments != null) {
+        visitComments(node.beginToken, locOfNode(node).columnNumber);
+        currentLine +=
+            endTokenLoc.lineNumber - locOfEntity(precedingComments).lineNumber;
+      }
       var newLoc = CharacterLocation(currentLine, columnRef);
-      content.move(content.locOfOldOffset(endToken.offset), newLoc);
+      content.move(endTokenLoc, newLoc);
     }
     super.visitArgumentList(node);
   }
@@ -253,22 +267,26 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
 
   @override
   void visitNode(AstNode node) {
-    var comments = node.beginToken.precedingComments;
-    while (comments != null) {
-      var commentLoc = locOfEntity(comments);
-      var startLineCol = content.getStartColumnOfLine(comments.offset);
-      if (commentLoc.columnNumber == startLineCol &&
-          commentLoc.columnNumber != 1) {
-        content.moveToColumn(commentLoc, locOfNode(node).columnNumber);
-      }
-      comments = comments.next as CommentToken?;
-    }
+    visitComments(node.beginToken, locOfNode(node).columnNumber);
 
     if (skipChildren) {
       skipChildren = false;
       return;
     }
     super.visitNode(node);
+  }
+
+  void visitComments(Token token, int columnRef) {
+    var comments = token.precedingComments;
+    while (comments != null) {
+      var commentLoc = locOfEntity(comments);
+      var startLineCol = content.getStartColumnOfLine(comments.offset);
+      if (commentLoc.columnNumber == startLineCol &&
+          commentLoc.columnNumber != 1) {
+        content.moveToColumn(commentLoc, columnRef);
+      }
+      comments = comments.next as CommentToken?;
+    }
   }
 
   bool hasTrailingComma(NodeList parameters) {
