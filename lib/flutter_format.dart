@@ -131,25 +131,17 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
   @override
   void visitFormalParameterList(FormalParameterList node) {
     var columnRef = content.getStartColumnOfLine(node.beginToken.offset);
-    var lineNumber = locOfNode(node).lineNumber;
     if (hasTrailingComma(node.parameters)) {
-      var currentLine = visitNodeListWithTrailingComma(
-        lineNumber: lineNumber,
+      visitNodeListWithTrailingComma(
+        lineNumber: locOfEntity(node.leftParenthesis).lineNumber,
         newColumn: columnRef + indentation,
         nodes: node.parameters,
       );
-
-      // move end of list tokens
-      var endToken = node.rightDelimiter ?? node.rightParenthesis;
-      var endTokenLoc = content.locOfOldOffset(endToken.offset);
-      var precedingComments = endToken.precedingComments;
-      if (precedingComments != null) {
-        visitComments(node.beginToken, locOfNode(node).columnNumber);
-        currentLine +=
-            endTokenLoc.lineNumber - locOfEntity(precedingComments).lineNumber;
-      }
-      var newLoc = CharacterLocation(currentLine, columnRef);
-      content.move(endTokenLoc, newLoc);
+      visitEndOfNodeListWithTrailingComma(
+        columnRef,
+        rightDelimiter: node.rightDelimiter,
+        rightParenthesis: node.rightParenthesis,
+      );
     }
     super.visitFormalParameterList(node);
   }
@@ -157,30 +149,21 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
   @override
   void visitArgumentList(ArgumentList node) {
     var columnRef = content.getStartColumnOfLine(node.beginToken.offset);
-    var lineNumber = locOfNode(node).lineNumber;
     if (hasTrailingComma(node.arguments)) {
-      var currentLine = visitNodeListWithTrailingComma(
-        lineNumber: lineNumber,
+      visitNodeListWithTrailingComma(
+        lineNumber: locOfEntity(node.leftParenthesis).lineNumber,
         newColumn: columnRef + indentation,
         nodes: node.arguments,
       );
-
-      // move end of list tokens
-      var endToken = node.rightParenthesis;
-      var endTokenLoc = content.locOfOldOffset(endToken.offset);
-      var precedingComments = endToken.precedingComments;
-      if (precedingComments != null) {
-        visitComments(node.beginToken, locOfNode(node).columnNumber);
-        currentLine +=
-            endTokenLoc.lineNumber - locOfEntity(precedingComments).lineNumber;
-      }
-      var newLoc = CharacterLocation(currentLine, columnRef);
-      content.move(endTokenLoc, newLoc);
+      visitEndOfNodeListWithTrailingComma(
+        columnRef,
+        rightParenthesis: node.rightParenthesis,
+      );
     }
     super.visitArgumentList(node);
   }
 
-  int visitNodeListWithTrailingComma({
+  void visitNodeListWithTrailingComma({
     required int lineNumber,
     required int newColumn,
     required NodeList nodes,
@@ -202,21 +185,41 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
       return locOfEntity(begin);
     }
 
-    var currentLine = lineNumber;
     for (var node in nodes) {
-      currentLine += 1;
-      var endline = content.locOfOldOffset(node.end).lineNumber;
-      var newLoc = CharacterLocation(currentLine, newColumn);
+      var newLoc = CharacterLocation(
+        locOfEntity(node.beginToken.previous!).lineNumber + 1,
+        newColumn,
+      );
       var locFull = locOfNodeWithComments(node);
       content.move(locFull, newLoc);
       var loc = locOfNode(node);
       content.moveToColumn(loc, newColumn);
-
-      var startline = locFull.lineNumber;
-      currentLine += endline - startline;
     }
-    currentLine += 1;
-    return currentLine;
+  }
+
+  void visitEndOfNodeListWithTrailingComma(
+    int columnRef, {
+    Token? rightDelimiter,
+    required Token rightParenthesis,
+  }) {
+    var endToken = rightDelimiter ?? rightParenthesis;
+    var endTokenLoc = content.locOfOldOffset(endToken.offset);
+    var precedingComments = endToken.precedingComments;
+    visitComments(precedingComments, columnRef + indentation);
+    var newLoc = CharacterLocation(
+      locOfEntity(lastTokenBefore(endToken)!).lineNumber + 1,
+      columnRef,
+    );
+    content.move(endTokenLoc, newLoc);
+    if (rightDelimiter != null && rightParenthesis.precedingComments == null) {
+      content.move(
+        locOfEntity(rightParenthesis),
+        CharacterLocation(
+          newLoc.lineNumber,
+          newLoc.columnNumber + 1,
+        ),
+      );
+    }
   }
 
   @override
@@ -267,7 +270,10 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
 
   @override
   void visitNode(AstNode node) {
-    visitComments(node.beginToken, locOfNode(node).columnNumber);
+    visitComments(
+      node.beginToken.precedingComments,
+      locOfNode(node).columnNumber,
+    );
 
     if (skipChildren) {
       skipChildren = false;
@@ -276,8 +282,7 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
     super.visitNode(node);
   }
 
-  void visitComments(Token token, int columnRef) {
-    var comments = token.precedingComments;
+  void visitComments(CommentToken? comments, int columnRef) {
     while (comments != null) {
       var commentLoc = locOfEntity(comments);
       var startLineCol = content.getStartColumnOfLine(comments.offset);
@@ -286,6 +291,18 @@ class FlutterFormat extends GeneralizingAstVisitor<void>
         content.moveToColumn(commentLoc, columnRef);
       }
       comments = comments.next as CommentToken?;
+    }
+  }
+
+  Token? lastTokenBefore(Token token) {
+    var comments = token.precedingComments;
+    if (comments == null) return token.previous;
+    while (true) {
+      var next = comments?.next;
+      if (next == null) {
+        return comments;
+      }
+      comments = next as CommentToken?;
     }
   }
 
@@ -414,7 +431,12 @@ class Change {
       var start = offset + (deleteDelta < 0 ? deleteDelta : 0);
       var end = offset + (deleteDelta < 0 ? 0 : deleteDelta);
       if (s.substring(start, end).trim().isNotEmpty) {
-        throw StateError('attempt to delete : "${s.substring(start, end)}"');
+        throw StateError(
+          'attempt to delete : \n'
+          '"${s.substring(max(0, start - 10), start)}'
+          '>>>${s.substring(start, end)}<<<'
+          '${s.substring(end, min(end + 10, s.length))}"',
+        );
       }
       s = s.substring(0, start) + s.substring(end);
     }

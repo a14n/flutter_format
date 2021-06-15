@@ -40,3 +40,16 @@ void m6(
   // a comment
 ) {
 }
+
+void m7(
+
+  // a
+  // comment
+  int i,
+) {
+}
+
+void m8({
+  int? i,
+}) {
+}
